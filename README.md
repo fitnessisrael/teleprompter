@@ -1,1 +1,25 @@
-# teleprompter
+# פרומפטר (PWA)
+
+אפליקציית ווב סטטית: פרומפטר + הקלטת טייקים במצלמה הקדמית, חיתוך ושמירה לתמונות.
+אין שרת, אין חשבונות, אין CDN. הכול (כולל ffmpeg.wasm) נמצא בתיקייה הזו.
+
+## קבצים
+- index.html, styles.css, app.js - האפליקציה
+- sw.js - service worker (מטמון מלא, עובד אופליין אחרי הטעינה הראשונה)
+- manifest.webmanifest, icons/ - התקנה למסך הבית
+- vendor/ffmpeg/ - ffmpeg.wasm 0.12.15 / core 0.12.10 (חד-תהליכוני, לא צריך כותרות COOP/COEP)
+
+## אחסון חינמי ב-HTTPS (חובה בשביל המצלמה)
+כל אחת מהאפשרויות עובדת, פשוט מעלים את התיקייה כמו שהיא:
+- Netlify Drop: גוררים את התיקייה ל-app.netlify.com/drop.
+- GitHub Pages: כל דחיפה ל-main מפרסמת את שורש הריפו דרך GitHub Actions
+  (`.github/workflows/pages.yml`). האתר: https://fitnessisrael.github.io/teleprompter/
+  (הקובץ ffmpeg-core.wasm הוא 32MB, מתחת למגבלת 100MB של GitHub.)
+- Vercel / Cloudflare Pages: פרויקט סטטי, בלי build.
+
+## התקנה באייפון
+פותחים את הכתובת בספארי > שיתוף > "הוסף למסך הבית". בפתיחה הראשונה מאשרים מצלמה ומיקרופון.
+פותחים פעם אחת עם אינטרנט, וגם נכנסים פעם אחת למסך "טייקים" ושומרים טייק חתוך, כדי שמנוע החיתוך יישמר במטמון.
+
+## בדיקה מקומית
+`python3 -m http.server 8000` ואז http://localhost:8000 (localhost נחשב מאובטח).
