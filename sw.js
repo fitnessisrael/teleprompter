@@ -1,5 +1,5 @@
 // Service worker: הכול נשמר במטמון אחרי הטעינה הראשונה, האפליקציה עובדת גם בלי אינטרנט.
-const VERSION = 'tp-v3';
+const VERSION = 'tp-v4';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/maskable-512.png'];
 const FF = ['vendor/ffmpeg/index.js', 'vendor/ffmpeg/classes.js', 'vendor/ffmpeg/const.js', 'vendor/ffmpeg/errors.js',

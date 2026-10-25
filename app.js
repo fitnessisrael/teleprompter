@@ -73,12 +73,14 @@ function applyPos() { pos = Math.min(Math.max(0, pos), maxPos()); ptext.style.tr
 function setFrac(f) { posFrac = Math.min(Math.max(0, f), 1); localStorage.setItem(LS.pos, String(posFrac)); }
 function storeFrac() { const h = ptext.scrollHeight || 1; setFrac(pos / h); }
 function layoutPrompter() {
-  const card = prompter.clientHeight;
   const lead = 10;
   const line = S.font * 1.38;
   const r = document.documentElement.style;
   r.setProperty('--lead', lead + 'px');
   r.setProperty('--line', line + 'px');
+  // שורה אחת פחות מהגובה באחוזים: גובה שורה ועוד הרווח שמתחתיה
+  r.setProperty('--card-cut', (line + S.font * 0.4) + 'px');
+  const card = prompter.clientHeight;
   if (!card) return;
   // ריפוד תחתון כדי שגם השורה האחרונה תוכל להגיע לקו הקריאה שבראש הכרטיס
   ptext.style.paddingTop = lead + 'px';
@@ -170,7 +172,9 @@ async function openCam() {
 }
 function stopStream() { stream?.getTracks().forEach((t) => t.stop()); stream = null; $('preview').srcObject = null; }
 function closeCam() {
-  if (state === 'rec') stopRec(); cancelCount();
+  if (state === 'rec') stopRec();
+  if (state === 'count') cancelCount();
+  else hideCountdown();
   stopStream(); try { wakeLock?.release(); } catch {} wakeLock = null; $('settings').hidden = true;
 }
 document.addEventListener('visibilitychange', async () => {
@@ -189,20 +193,51 @@ $('recBtn').onclick = () => {
   else if (state === 'count') cancelCount();
   else if (state === 'rec') stopRec();
 };
+let countGen = 0;
+function hideCountdown() {
+  const cd = $('countdown');
+  cd.classList.remove('show');
+  cd.hidden = true;
+  cd.textContent = '';
+}
+function showCountdown(n) {
+  countGen++;
+  const cd = $('countdown');
+  cd.textContent = String(n);
+  cd.hidden = false;
+  cd.classList.add('show');
+}
+// הסתרה מיידית ועוד כמה טיימרים. בלי animationend — בספארי הוא לא תמיד נורה, ו-display:flex דורס את hidden.
+function armCountdownHide() {
+  const gen = ++countGen;
+  const run = () => { if (gen === countGen) hideCountdown(); };
+  run();
+  setTimeout(run, 0);
+  setTimeout(run, 120);
+  setTimeout(run, 400);
+}
 function startCount() {
   if (!stream) { openCam(); return; }
   if (!mime) { toast('הדפדפן לא תומך בהקלטת וידאו (MediaRecorder).', 5000); return; }
   $('settings').hidden = true;
+  clearTimeout(countT);
   let n = +S.cd; state = 'count'; $('recBtn').className = 'counting';
-  const cdEl = $('countdown');
   const tick = () => {
-    if (n <= 0) { cdEl.hidden = true; startRec(); return; }
-    cdEl.textContent = n; cdEl.hidden = false; n--; countT = setTimeout(tick, 1000);
+    if (state !== 'count') return;
+    if (n <= 0) { startRec(); return; }
+    showCountdown(n); n--; countT = setTimeout(tick, 1000);
   };
   tick();
 }
-function cancelCount() { if (state !== 'count') return; clearTimeout(countT); $('countdown').hidden = true; state = 'idle'; $('recBtn').className = ''; }
+function cancelCount() {
+  if (state !== 'count') return;
+  clearTimeout(countT); countT = null;
+  armCountdownHide();
+  state = 'idle'; $('recBtn').className = '';
+}
 function startRec() {
+  clearTimeout(countT); countT = null;
+  armCountdownHide();
   chunks = []; hist = []; paused = false; $('pausedTag').hidden = true;
   const q = QUAL[S.q] || QUAL['4k'];
   const st = stream.getVideoTracks()[0].getSettings();
