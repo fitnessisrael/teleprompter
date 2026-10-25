@@ -1,7 +1,7 @@
 // פרומפטר - PWA סטטי. אין שרת, אין חשבונות, אין תלות ב-CDN.
 const $ = (id) => document.getElementById(id);
 const LS = { script: 'tp.script', pos: 'tp.pos', settings: 'tp.settings' };
-const DEF = { speed: 4, font: 34, ph: 40, cd: 3, q: '4k', ts: 0, te: 3, mirror: true };
+const DEF = { speed: 4, font: 34, ph: 36, cd: 3, q: '4k', ts: 0, te: 3, mirror: true };
 const QUAL = {
   '4k':   { w: 3840, h: 2160, vbps: 24_000_000 },
   '1080': { w: 1920, h: 1080, vbps: 12_000_000 },
@@ -35,8 +35,10 @@ let takes = ((await dbAll().catch(() => [])) || []).sort((a, b) => a.created - b
 
 /* ================= מסכים ================= */
 function show(id) {
+  if (id !== 'takes' && !$('trimView').hidden) closeTrim();
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
-  if (id === 'cam') openCam(); else closeCam();
+  if (id === 'cam') { openCam(); requestAnimationFrame(() => { layoutPrompter(); loadFrac(); }); }
+  else closeCam();
   if (id === 'takes') renderTakes();
   if (id === 'home') updateHome();
 }
@@ -66,17 +68,31 @@ function renderScript() {
     const p = document.createElement('p'); p.dir = 'auto'; p.textContent = line || '\u00a0'; return p;
   }));
 }
-const maxPos = () => Math.max(0, ptext.scrollHeight - window.innerHeight * 0.8 - 10);
+const maxPos = () => Math.max(0, ptext.scrollHeight - (prompter.clientHeight || 1));
 function applyPos() { pos = Math.min(Math.max(0, pos), maxPos()); ptext.style.transform = `translate3d(0,${-pos}px,0)`; }
 function setFrac(f) { posFrac = Math.min(Math.max(0, f), 1); localStorage.setItem(LS.pos, String(posFrac)); }
 function storeFrac() { const h = ptext.scrollHeight || 1; setFrac(pos / h); }
-function loadFrac() { pos = posFrac * (ptext.scrollHeight || 0); applyPos(); }
+function layoutPrompter() {
+  const card = prompter.clientHeight;
+  const lead = 10;
+  const line = S.font * 1.38;
+  const r = document.documentElement.style;
+  r.setProperty('--lead', lead + 'px');
+  r.setProperty('--line', line + 'px');
+  if (!card) return;
+  // ריפוד תחתון כדי שגם השורה האחרונה תוכל להגיע לקו הקריאה שבראש הכרטיס
+  ptext.style.paddingTop = lead + 'px';
+  ptext.style.paddingBottom = Math.max(0, card - lead - line) + 'px';
+}
+function loadFrac() { layoutPrompter(); pos = posFrac * (ptext.scrollHeight || 0); applyPos(); }
 function applyStyle() {
   const r = document.documentElement.style;
   r.setProperty('--font', S.font + 'px'); r.setProperty('--ph', S.ph + '%');
   $('preview').classList.toggle('mirror', !!S.mirror); $('mirrorBtn').classList.toggle('on', !!S.mirror);
   $('speedVal').textContent = S.speed;
+  layoutPrompter();
 }
+window.addEventListener('resize', () => { if ($('cam').classList.contains('active')) loadFrac(); });
 function changeFont(d) { storeFrac(); S.font = Math.min(80, Math.max(18, S.font + d)); saveSettings(); applyStyle(); syncSettingsUI(); requestAnimationFrame(loadFrac); }
 function changeSpeed(d) { S.speed = Math.min(20, Math.max(1, +(S.speed + d).toFixed(1))); saveSettings(); applyStyle(); syncSettingsUI(); }
 $('fontUp').onclick = () => changeFont(2); $('fontDown').onclick = () => changeFont(-2);
@@ -196,6 +212,9 @@ function startRec() {
   catch { recorder = new MediaRecorder(stream, { mimeType: mime }); }
   recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
   recorder.onstop = onRecStop;
+  // MediaRecorder לא חושף מרווח בין פריימי מפתח (גם לא בספארי באייפון).
+  // start(1000) רק מרוקן נתונים כל שנייה, ולא מכריח keyframe.
+  // חיתוך בלי קידוד מחדש נצמד ל-keyframe הקרוב, בדרך כלל עד כשנייה–שתיים.
   recorder.start(1000);
   recStartT = performance.now(); takeStartPos = pos;
   state = 'rec'; scrolling = true; $('recBtn').className = 'recording'; $('recInfo').classList.add('rec');
@@ -241,6 +260,11 @@ function closeReview() {
 
 // שלט / מקלדת Bluetooth
 document.addEventListener('keydown', (e) => {
+  if (!$('trimView').hidden) {
+    if (e.key === 'Escape') closeTrim();
+    else if (e.code === 'Space') { e.preventDefault(); $('trimPlay').click(); }
+    return;
+  }
   if (!$('cam').classList.contains('active') || e.target.matches('input,textarea,select')) return;
   if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); if (state !== 'review') $('recBtn').click(); else $('keepBtn').click(); }
   else if (e.code === 'ArrowUp' || e.code === 'ArrowRight') changeSpeed(0.5);
@@ -260,7 +284,7 @@ $('gearBtn').onclick = () => { if (busyRec()) return; syncSettingsUI(); $('setti
 $('closeSettings').onclick = () => $('settings').hidden = true;
 $('s_speed').oninput = (e) => { S.speed = +e.target.value; saveSettings(); applyStyle(); syncSettingsUI(); };
 $('s_font').oninput = (e) => { storeFrac(); S.font = +e.target.value; saveSettings(); applyStyle(); syncSettingsUI(); requestAnimationFrame(loadFrac); };
-$('s_ph').oninput = (e) => { S.ph = +e.target.value; saveSettings(); applyStyle(); syncSettingsUI(); };
+$('s_ph').oninput = (e) => { storeFrac(); S.ph = +e.target.value; saveSettings(); applyStyle(); syncSettingsUI(); requestAnimationFrame(loadFrac); };
 $('s_cd').onchange = (e) => { S.cd = +e.target.value; saveSettings(); };
 $('s_ts').onchange = (e) => { S.ts = Math.max(0, +e.target.value || 0); saveSettings(); };
 $('s_te').onchange = (e) => { S.te = Math.max(0, +e.target.value || 0); saveSettings(); };
@@ -281,33 +305,15 @@ function renderTakes() {
     el.innerHTML = `
       <div class="meta"><b>טייק ${i + 1}</b><span class="d"></span></div>
       <video playsinline controls preload="metadata"></video>
-      <div class="trim">
-        <label>חיתוך בהתחלה (שנ׳)<div class="stepper"><button data-k="ts" data-d="-0.5">−</button><input type="number" step="0.1" min="0" data-f="ts"><button data-k="ts" data-d="0.5">+</button></div></label>
-        <label>חיתוך בסוף (שנ׳)<div class="stepper"><button data-k="te" data-d="-0.5">−</button><input type="number" step="0.1" min="0" data-f="te"><button data-k="te" data-d="0.5">+</button></div></label>
-      </div>
       <div class="acts">
-        <button class="btn" data-a="play">▶ תצוגה חתוכה</button>
+        <button class="btn scissor" data-a="trim" aria-label="חיתוך">✂</button>
         <button class="btn primary" data-a="save">שמור</button>
         <button class="btn danger" data-a="del">מחק</button>
       </div>`;
     const v = el.querySelector('video'); v.src = urlFor(t);
+    const upd = () => { el.querySelector('.d').textContent = `${fmt(t.dur)} ← ${fmt(keepDur(t))} · ${t.w || '?'}×${t.h || '?'}`; };
     v.onloadedmetadata = () => { if (isFinite(v.duration) && v.duration > 0 && Math.abs(v.duration - t.dur) > 0.2) { t.dur = v.duration; dbPut(t).catch(() => {}); upd(); } };
-    const inTs = el.querySelector('[data-f=ts]'), inTe = el.querySelector('[data-f=te]');
-    const upd = () => {
-      inTs.value = t.ts.toFixed(1); inTe.value = t.te.toFixed(1);
-      el.querySelector('.d').textContent = `${fmt(t.dur)} ← ${fmt(keepDur(t))} · ${t.w || '?'}×${t.h || '?'}`;
-    };
-    const setTrim = (k, val) => {
-      val = Math.max(0, +val || 0);
-      const other = k === 'ts' ? t.te : t.ts; val = Math.min(val, Math.max(0, t.dur - other - 0.5));
-      t[k] = Math.round(val * 10) / 10; dbPut(t).catch(() => {}); upd();
-      v.currentTime = k === 'ts' ? t.ts : Math.max(0, t.dur - t.te);
-    };
-    el.querySelectorAll('.stepper button').forEach((b) => b.onclick = () => setTrim(b.dataset.k, t[b.dataset.k] + +b.dataset.d));
-    inTs.onchange = () => setTrim('ts', inTs.value); inTe.onchange = () => setTrim('te', inTe.value);
-    let stopAt = null;
-    v.ontimeupdate = () => { if (stopAt != null && v.currentTime >= stopAt) { v.pause(); stopAt = null; } };
-    el.querySelector('[data-a=play]').onclick = () => { v.currentTime = t.ts; stopAt = t.dur - t.te; v.play(); };
+    el.querySelector('[data-a=trim]').onclick = () => openTrim(t, i);
     el.querySelector('[data-a=save]').onclick = () => exportTakes([t], false, `take-${i + 1}`);
     el.querySelector('[data-a=del]').onclick = async () => {
       if (!confirm(`למחוק את טייק ${i + 1}?`)) return;
@@ -317,6 +323,223 @@ function renderTakes() {
     upd(); list.appendChild(el);
   });
 }
+
+/* ================= חיתוך בידיות ================= */
+let trim = null, filmToken = 0;
+const MIN_KEEP = 0.4;
+const inPoint = () => trim ? trim.ts : 0;
+const outPoint = () => trim ? Math.max(inPoint(), trim.dur - trim.te) : 0;
+function round2(n) { return Math.round(n * 100) / 100; }
+function clampDraft() {
+  if (!trim || !(trim.dur > 0.2)) return;
+  const gap = Math.min(MIN_KEEP, trim.dur * 0.5);
+  trim.ts = Math.max(0, +trim.ts || 0);
+  trim.te = Math.max(0, +trim.te || 0);
+  if (trim.ts > trim.dur - gap) trim.ts = Math.max(0, trim.dur - gap);
+  if (trim.ts + trim.te > trim.dur - gap) trim.te = Math.max(0, trim.dur - trim.ts - gap);
+}
+function xToTime(clientX) {
+  const r = $('filmstrip').getBoundingClientRect();
+  if (!r.width || !trim) return 0;
+  const x = Math.min(r.width, Math.max(0, clientX - r.left));
+  return (x / r.width) * trim.dur;
+}
+let seekRaf = 0;
+function seekPreview(t) {
+  const v = $('trimVideo');
+  if (!trim) return;
+  const target = Math.max(0, Math.min(t, Math.max(0, trim.dur - 0.04)));
+  trim.scrub = target;
+  layoutTrim();
+  if (Math.abs((v.currentTime || 0) - target) < 0.03) return;
+  cancelAnimationFrame(seekRaf);
+  seekRaf = requestAnimationFrame(() => { try { v.currentTime = target; } catch {} });
+}
+function layoutTrim() {
+  if (!trim) return;
+  const strip = $('filmstrip');
+  const w = strip.clientWidth || 1;
+  const d = trim.dur || 1;
+  const x1 = (inPoint() / d) * w;
+  const x2 = (outPoint() / d) * w;
+  $('handleIn').style.left = x1 + 'px';
+  $('handleOut').style.left = x2 + 'px';
+  $('trimShadeL').style.width = x1 + 'px';
+  $('trimShadeR').style.right = 'auto';
+  $('trimShadeR').style.left = x2 + 'px';
+  $('trimShadeR').style.width = Math.max(0, w - x2) + 'px';
+  $('trimWindow').style.left = x1 + 'px';
+  $('trimWindow').style.width = Math.max(0, x2 - x1) + 'px';
+  const v = $('trimVideo');
+  const cur = trim.scrub != null ? trim.scrub : (v.currentTime || inPoint());
+  const shown = Math.min(outPoint(), Math.max(inPoint(), cur));
+  $('trimPlayhead').style.left = (shown / d) * w + 'px';
+  const sel = Math.max(0, outPoint() - inPoint());
+  const elapsed = Math.min(sel, Math.max(0, shown - inPoint()));
+  $('trimClock').textContent = `${fmt(elapsed)} / ${fmt(sel)}`;
+  if (document.activeElement !== $('trimTs')) $('trimTs').value = trim.ts.toFixed(1);
+  if (document.activeElement !== $('trimTe')) $('trimTe').value = trim.te.toFixed(1);
+  $('handleIn').setAttribute('aria-valuenow', trim.ts.toFixed(2));
+  $('handleIn').setAttribute('aria-valuemax', d.toFixed(2));
+  $('handleOut').setAttribute('aria-valuenow', outPoint().toFixed(2));
+  $('handleOut').setAttribute('aria-valuemax', d.toFixed(2));
+  $('handleIn').setAttribute('aria-valuetext', trim.ts.toFixed(1) + ' שניות');
+  $('handleOut').setAttribute('aria-valuetext', outPoint().toFixed(1) + ' שניות');
+}
+function bindHandle(el, which) {
+  const keyStep = (dir) => {
+    const gap = Math.min(MIN_KEEP, (trim?.dur || 1) * 0.5);
+    if (which === 'in') trim.ts = Math.max(0, Math.min(trim.ts + dir * 0.1, trim.dur - trim.te - gap));
+    else trim.te = Math.max(0, Math.min(trim.te - dir * 0.1, trim.dur - trim.ts - gap));
+    seekPreview(which === 'in' ? trim.ts : outPoint());
+  };
+  el.addEventListener('keydown', (e) => {
+    if (!trim) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); keyStep(-1); }
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); keyStep(1); }
+  });
+  el.addEventListener('pointerdown', (e) => {
+    if (!trim) return;
+    e.preventDefault(); e.stopPropagation();
+    el.setPointerCapture(e.pointerId);
+    el.style.zIndex = '5';
+    $('trimVideo').pause();
+    $('trimPlay').textContent = '▶';
+    const move = (ev) => {
+      const gap = Math.min(MIN_KEEP, trim.dur * 0.5);
+      const t = xToTime(ev.clientX);
+      if (which === 'in') trim.ts = Math.max(0, Math.min(t, trim.dur - trim.te - gap));
+      else trim.te = Math.max(0, Math.min(trim.dur - t, trim.dur - trim.ts - gap));
+      seekPreview(which === 'in' ? inPoint() : outPoint());
+    };
+    const up = () => {
+      trim.scrub = null;
+      el.style.zIndex = '';
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      layoutTrim();
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    move(e);
+  });
+}
+bindHandle($('handleIn'), 'in');
+bindHandle($('handleOut'), 'out');
+function seekVideo(v, t) {
+  return new Promise((resolve) => {
+    const target = Math.max(0, t);
+    if (Math.abs((v.currentTime || 0) - target) < 0.03 && v.readyState >= 2) return resolve();
+    const done = () => { v.removeEventListener('seeked', done); resolve(); };
+    v.addEventListener('seeked', done);
+    try { v.currentTime = target; } catch { v.removeEventListener('seeked', done); resolve(); return; }
+    setTimeout(() => { v.removeEventListener('seeked', done); resolve(); }, 800);
+  });
+}
+async function buildFilmstrip() {
+  if (!trim) return;
+  const token = ++filmToken;
+  const src = $('trimVideo').currentSrc || $('trimVideo').src;
+  const strip = $('filmstrip');
+  const c = $('filmCanvas');
+  const w = strip.clientWidth, h = strip.clientHeight;
+  if (!w || !h || !src) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+  const ctx = c.getContext('2d');
+  const off = document.createElement('video');
+  off.muted = true; off.playsInline = true; off.preload = 'auto'; off.src = src;
+  await new Promise((res) => { off.onloadeddata = () => res(); off.onerror = () => res(); setTimeout(res, 2500); });
+  const n = Math.max(6, Math.min(12, Math.round(w / 46)));
+  const fw = c.width / n;
+  for (let i = 0; i < n; i++) {
+    if (token !== filmToken || !trim) break;
+    const t = Math.min(Math.max(0, trim.dur - 0.05), ((i + 0.5) / n) * trim.dur);
+    await seekVideo(off, t);
+    if (token !== filmToken) break;
+    try { ctx.drawImage(off, i * fw, 0, fw + 1, c.height); } catch {}
+  }
+  off.removeAttribute('src'); off.load();
+}
+function openTrim(t, i) {
+  document.querySelectorAll('#takeList video').forEach((v) => v.pause());
+  const v = $('trimVideo');
+  trim = { take: t, i, ts: +t.ts || 0, te: +t.te || 0, dur: t.dur || 0, scrub: null };
+  $('trimChip').textContent = `טייק ${i + 1}`;
+  $('trimPlay').textContent = '▶';
+  $('trimView').hidden = false;
+  let trimReady = false;
+  const init = () => {
+    if (trimReady || !trim || trim.take !== t) return;
+    trimReady = true;
+    if (isFinite(v.duration) && v.duration > 0) { trim.dur = v.duration; t.dur = v.duration; }
+    clampDraft();
+    layoutTrim();
+    seekPreview(trim.ts);
+    trim.scrub = null;
+    buildFilmstrip();
+  };
+  v.onloadedmetadata = init;
+  v.src = urlFor(t);
+  if (v.readyState >= 1) init();
+}
+function closeTrim() {
+  filmToken++;
+  const v = $('trimVideo');
+  v.pause(); v.onloadedmetadata = null; v.removeAttribute('src'); v.load();
+  $('trimView').hidden = true;
+  trim = null;
+  $('trimPlay').textContent = '▶';
+}
+$('trimClose').onclick = closeTrim;
+$('trimVideo').onclick = () => { if (trim) $('trimPlay').click(); };
+$('trimPlay').onclick = () => {
+  if (!trim) return;
+  const v = $('trimVideo');
+  if (!v.paused && !v.ended) { v.pause(); $('trimPlay').textContent = '▶'; trim.scrub = null; layoutTrim(); return; }
+  trim.scrub = null;
+  if (v.currentTime < inPoint() - 0.02 || v.currentTime >= outPoint() - 0.05) v.currentTime = inPoint();
+  v.play().then(() => { $('trimPlay').textContent = '❚❚'; }).catch(() => {});
+};
+$('trimVideo').ontimeupdate = () => {
+  if (!trim || trim.scrub != null) return;
+  const v = $('trimVideo');
+  if (!v.paused && v.currentTime >= outPoint() - 0.02) {
+    v.pause(); v.currentTime = inPoint(); $('trimPlay').textContent = '▶';
+  }
+  layoutTrim();
+};
+$('trimVideo').onpause = () => { if (trim && $('trimVideo').paused) $('trimPlay').textContent = '▶'; };
+function applyNumber(which) {
+  if (!trim) return;
+  const el = which === 'ts' ? $('trimTs') : $('trimTe');
+  const val = +el.value;
+  if (!isFinite(val)) return;
+  trim[which] = Math.max(0, val);
+  clampDraft();
+  seekPreview(which === 'ts' ? trim.ts : outPoint());
+  trim.scrub = null;
+}
+$('trimTs').onchange = () => applyNumber('ts');
+$('trimTe').onchange = () => applyNumber('te');
+$('trimSave').onclick = async () => {
+  if (!trim) return;
+  const t = trim.take;
+  const v = $('trimVideo');
+  if (isFinite(v.duration) && v.duration > 0) t.dur = v.duration;
+  t.ts = round2(trim.ts); t.te = round2(trim.te);
+  try { await dbPut(t); } catch (e) { console.warn(e); toast('החיתוך לא נשמר לזיכרון'); return; }
+  closeTrim(); renderTakes(); toast('החיתוך נשמר ✓', 1500);
+};
+$('filmstrip').addEventListener('pointerdown', (e) => {
+  if (!trim || e.target.classList.contains('trim-handle')) return;
+  $('trimVideo').pause();
+  $('trimPlay').textContent = '▶';
+  seekPreview(Math.max(inPoint(), Math.min(outPoint(), xToTime(e.clientX))));
+  trim.scrub = null;
+});
 $('saveAll').onclick = () => exportTakes(takes, false, 'take');
 $('joinAll').onclick = () => exportTakes(takes, true, 'video');
 $('clearAll').onclick = async () => {
@@ -423,5 +646,10 @@ if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכ�
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));
 $('envInfo').textContent = env.join(' ');
-if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
-window.__tp = { takes: () => takes, state: () => state }; // לבדיקות
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  const hadWorker = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
+  // טלפון שכבר שמר את הגרסה הקודמת יטען מחדש ברגע שהמטמון החדש משתלט
+  if (hadWorker) navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
+}
+window.__tp = { takes: () => takes, state: () => state, trim: () => trim }; // לבדיקות

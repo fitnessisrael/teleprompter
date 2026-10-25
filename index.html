@@ -36,18 +36,21 @@
 <section id="cam" class="screen">
   <video id="preview" playsinline autoplay muted></video>
 
-  <div id="prompter" aria-label="פרומפטר">
-    <div id="ptext"></div>
-    <div id="readLine"></div>
-    <div id="pausedTag" hidden>מושהה - הקש להמשך</div>
-  </div>
-
   <div id="topbar">
     <button id="camBack" class="icon" aria-label="חזרה">✕</button>
     <span id="recInfo" class="chip"></span>
     <button id="mirrorBtn" class="icon" aria-label="מראה">⇋</button>
-    <button id="fontDown" class="icon" aria-label="הקטן גופן">א-</button>
+  </div>
+
+  <div id="prompter" aria-label="פרומפטר">
+    <div id="readLine"></div>
+    <div id="ptext"></div>
+    <div id="pausedTag" hidden>מושהה - הקש להמשך</div>
+  </div>
+
+  <div id="sideTools">
     <button id="fontUp" class="icon" aria-label="הגדל גופן">א+</button>
+    <button id="fontDown" class="icon" aria-label="הקטן גופן">א-</button>
     <button id="gearBtn" class="icon" aria-label="הגדרות">⚙</button>
   </div>
 
@@ -79,7 +82,7 @@
       <input type="number" id="s_ts" min="0" max="10" step="0.5"></label>
     <label>חיתוך ברירת מחדל - סוף (שניות)
       <input type="number" id="s_te" min="0" max="10" step="0.5"></label>
-    <p class="muted small">ההקלטה מתחילה רק אחרי הספירה, לכן בדרך כלל אין צורך לחתוך בהתחלה. בסוף נחתכות 3 שניות של ההליכה לטלפון, והתסריט חוזר אחורה באותו זמן לטייק הבא.</p>
+    <p class="muted small">ההקלטה מתחילה רק אחרי הספירה, לכן בדרך כלל אין צורך לחתוך בהתחלה. בסוף נחתכות 3 שניות של ההליכה לטלפון, והתסריט חוזר אחורה באותו זמן לטייק הבא. אפשר לדייק כל טייק אחר כך עם כפתור המספריים.</p>
     <button id="closeSettings" class="btn primary">סגור</button>
   </div>
 
@@ -105,7 +108,7 @@
     <button id="saveAll" class="btn primary big">שמור את כל הטייקים (חתוכים)</button>
     <button id="joinAll" class="btn big">חבר הכול לסרטון אחד</button>
     <button id="clearAll" class="btn danger">סשן חדש (מחיקת כל הטייקים)</button>
-    <p class="muted small">שמירה פותחת את חלון השיתוף של האייפון, ושם בוחרים "שמור סרטון". החיתוך נעשה בטלפון עצמו בלי קידוד מחדש, כך שהאיכות נשמרת במלואה.</p>
+    <p class="muted small">שמירה פותחת את חלון השיתוף של האייפון, ושם בוחרים "שמור סרטון". החיתוך נעשה בטלפון עצמו בלי קידוד מחדש, כך שהאיכות נשמרת. נקודת החיתוך נצמדת לפריים-מפתח הקרוב — באייפון בדרך כלל עד כשנייה או שתיים מהידית — כי הדפדפן לא מאפשר לקבוע את תדירות פריימי המפתח בהקלטה.</p>
   </div>
 </section>
 
@@ -118,6 +121,34 @@
     <button id="procSave" class="btn primary big" hidden>שמור לתמונות</button>
     <button id="procClose" class="btn ghost">סגור</button>
   </div>
+</div>
+
+<div id="trimView" role="dialog" aria-modal="true" aria-label="חיתוך טייק" hidden>
+  <header class="trim-top">
+    <button id="trimClose" class="icon" aria-label="סגור">✕</button>
+    <span id="trimChip" class="trim-chip">טייק</span>
+    <span class="trim-spacer"></span>
+  </header>
+  <video id="trimVideo" playsinline></video>
+  <div id="filmstrip" dir="ltr">
+    <canvas id="filmCanvas"></canvas>
+    <div id="trimShadeL"></div>
+    <div id="trimShadeR"></div>
+    <div id="trimWindow"></div>
+    <div id="trimPlayhead"></div>
+    <div id="handleIn" class="trim-handle" role="slider" tabindex="0" aria-label="התחלת החיתוך" aria-valuemin="0" aria-orientation="horizontal"></div>
+    <div id="handleOut" class="trim-handle" role="slider" tabindex="0" aria-label="סוף החיתוך" aria-valuemin="0" aria-orientation="horizontal"></div>
+  </div>
+  <div class="trim-bar">
+    <button id="trimPlay" class="icon lg" aria-label="נגן">▶</button>
+    <span id="trimClock">0:00.0 / 0:00.0</span>
+  </div>
+  <div class="trim-nums">
+    <label>התחלה (שנ׳)<input id="trimTs" type="number" min="0" step="0.1" inputmode="decimal"></label>
+    <label>סוף (שנ׳)<input id="trimTe" type="number" min="0" step="0.1" inputmode="decimal"></label>
+  </div>
+  <p class="muted small trim-note">השמירה חותכת בלי קידוד מחדש, לכן היא נצמדת לפריים-מפתח הקרוב (באייפון בדרך כלל עד כשנייה–שתיים מהידית). התצוגה בזמן הגרירה מראה את הפריים המדויק.</p>
+  <button id="trimSave" class="btn primary big">שמור</button>
 </div>
 
 <div id="toast" hidden></div>
