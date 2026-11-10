@@ -146,13 +146,25 @@ async function getStream() {
   ];
   let lastErr;
   for (const t of tries) {
-    const video = t ? { facingMode: 'user', width: { ideal: t.w }, height: { ideal: t.h }, frameRate: { ideal: 30 } } : { facingMode: 'user' };
-    try { return await navigator.mediaDevices.getUserMedia({ video, audio }); }
+    // max על שני הצדדים - כדי שהטלפון לא ייתן 4K גם כשביקשנו 1080p (בלי קשר לכיוון המסך)
+    const lim = Math.max(q.w, q.h);
+    const video = t ? { facingMode: 'user', width: { ideal: t.w, max: lim }, height: { ideal: t.h, max: lim }, frameRate: { ideal: 30 } } : { facingMode: 'user' };
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video, audio });
+      await fitRes(s, q); return s;
+    }
     catch (e) { lastErr = e; if (e.name === 'NotAllowedError' || e.name === 'SecurityError') break; }
   }
   // ניסיון אחרון: עם עיבוד אודיו ברירת מחדל
   try { return await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true }); } catch {}
   throw lastErr;
+}
+// אם המצלמה בכל זאת פתחה ברזולוציה גבוהה מהנבחרת - מורידים אותה
+async function fitRes(s, q) {
+  const tr = s.getVideoTracks()[0]; const st = tr?.getSettings?.() || {};
+  if (Math.max(st.width || 0, st.height || 0) <= Math.max(q.w, q.h) * 1.05) return;
+  const land = (st.width || 0) >= (st.height || 0);
+  try { await tr.applyConstraints({ width: land ? q.w : q.h, height: land ? q.h : q.w, frameRate: { ideal: 30 } }); } catch (e) { console.warn('applyConstraints', e); }
 }
 async function openCam() {
   renderScript(); applyStyle(); requestAnimationFrame(loadFrac);
@@ -688,7 +700,7 @@ async function exportTakes(list, join, base) {
 
 /* ================= אתחול ================= */
 renderScript(); applyStyle(); updateHome();
-const env = [];
+const env = ['גרסה 6'];
 if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכתובת HTTPS.');
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));
