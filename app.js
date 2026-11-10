@@ -1,14 +1,16 @@
 // פרומפטר - PWA סטטי. אין שרת, אין חשבונות, אין תלות ב-CDN.
 const $ = (id) => document.getElementById(id);
 const LS = { script: 'tp.script', pos: 'tp.pos', settings: 'tp.settings' };
-const DEF = { speed: 4, font: 34, ph: 36, cd: 3, q: '4k', ts: 0, te: 3, mirror: true };
+const DEF = { speed: 4, font: 34, ph: 36, cd: 3, q: '1080', ts: 0, te: 3, mirror: true, v: 2 };
 const QUAL = {
   '4k':   { w: 3840, h: 2160, vbps: 24_000_000 },
-  '1080': { w: 1920, h: 1080, vbps: 12_000_000 },
+  '1080': { w: 1920, h: 1080, vbps: 10_000_000 }, // ברירת מחדל: 1080x1920 - הגודל שאינסטגרם מציג
   '720':  { w: 1280, h: 720,  vbps: 6_000_000 },
 };
 let S = { ...DEF, ...safeJSON(localStorage.getItem(LS.settings)) };
 function safeJSON(s) { try { return JSON.parse(s) || {}; } catch { return {}; } }
+// הגירה: מי שנשאר על 4K מהגרסה הקודמת עובר ל-1080p (אפשר להחזיר בהגדרות)
+if ((S.v || 1) < 2) { if (S.q === '4k') S.q = '1080'; S.v = 2; localStorage.setItem(LS.settings, JSON.stringify(S)); }
 function saveSettings() { localStorage.setItem(LS.settings, JSON.stringify(S)); }
 
 const toastEl = $('toast'); let toastT;
@@ -138,7 +140,7 @@ function pickMime() {
 }
 async function getStream() {
   const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 2 } };
-  const q = QUAL[S.q] || QUAL['4k'];
+  const q = QUAL[S.q] || QUAL['1080'];
   const tries = [
     { w: q.w, h: q.h }, { w: 1920, h: 1080 }, null,
   ];
@@ -239,10 +241,10 @@ function startRec() {
   clearTimeout(countT); countT = null;
   armCountdownHide();
   chunks = []; hist = []; paused = false; $('pausedTag').hidden = true;
-  const q = QUAL[S.q] || QUAL['4k'];
+  const q = QUAL[S.q] || QUAL['1080'];
   const st = stream.getVideoTracks()[0].getSettings();
   const px = (st.width || 1920) * (st.height || 1080);
-  const vbps = px >= 3840 * 2160 * 0.9 ? QUAL['4k'].vbps : px >= 1920 * 1080 * 0.9 ? Math.min(q.vbps, QUAL['1080'].vbps) : QUAL['720'].vbps;
+  const vbps = px >= 3840 * 2160 * 0.9 && S.q === '4k' ? QUAL['4k'].vbps : px >= 1920 * 1080 * 0.9 ? Math.min(q.vbps, QUAL['1080'].vbps) : QUAL['720'].vbps;
   try { recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: vbps, audioBitsPerSecond: 192_000 }); }
   catch { recorder = new MediaRecorder(stream, { mimeType: mime }); }
   recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
@@ -336,7 +338,7 @@ function renderTakes() {
   const list = $('takeList'); list.replaceChildren();
   $('noTakes').hidden = takes.length > 0; $('bulk').hidden = takes.length === 0;
   takes.forEach((t, i) => {
-    const el = document.createElement('div'); el.className = 'take';
+    const el = document.createElement('div'); el.className = 'take'; el.dataset.id = t.id;
     el.innerHTML = `
       <div class="meta"><b>טייק ${i + 1}</b><span class="d"></span></div>
       <video playsinline controls preload="metadata"></video>
@@ -520,13 +522,22 @@ function openTrim(t, i) {
   v.src = urlFor(t);
   if (v.readyState >= 1) init();
 }
+function scrollToTake(id) {
+  const el = id && document.querySelector(`#takeList .take[data-id="${CSS.escape(id)}"]`);
+  if (!el) return;
+  const go = () => el.scrollIntoView({ block: 'center' });
+  go(); requestAnimationFrame(go); setTimeout(go, 150);
+  el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1600);
+}
 function closeTrim() {
+  const lastId = trim?.take?.id;
   filmToken++;
   const v = $('trimVideo');
   v.pause(); v.onloadedmetadata = null; v.removeAttribute('src'); v.load();
   $('trimView').hidden = true;
   trim = null;
   $('trimPlay').textContent = '▶';
+  scrollToTake(lastId);
 }
 $('trimClose').onclick = closeTrim;
 $('trimVideo').onclick = () => { if (trim) $('trimPlay').click(); };
@@ -566,7 +577,8 @@ $('trimSave').onclick = async () => {
   if (isFinite(v.duration) && v.duration > 0) t.dur = v.duration;
   t.ts = round2(trim.ts); t.te = round2(trim.te);
   try { await dbPut(t); } catch (e) { console.warn(e); toast('החיתוך לא נשמר לזיכרון'); return; }
-  closeTrim(); renderTakes(); toast('החיתוך נשמר ✓', 1500);
+  const n = trim.i + 1;
+  renderTakes(); closeTrim(); toast(`טייק ${n} נשמר ✓`, 1500);
 };
 $('filmstrip').addEventListener('pointerdown', (e) => {
   if (!trim || e.target.classList.contains('trim-handle')) return;
