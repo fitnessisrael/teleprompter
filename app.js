@@ -1,16 +1,17 @@
 // פרומפטר - PWA סטטי. אין שרת, אין חשבונות, אין תלות ב-CDN.
 const $ = (id) => document.getElementById(id);
 const LS = { script: 'tp.script', pos: 'tp.pos', settings: 'tp.settings' };
-const DEF = { speed: 4, font: 34, ph: 36, cd: 3, q: '1080', ts: 0, te: 3, mirror: true, v: 2 };
+const DEF = { speed: 4, font: 34, ph: 36, cd: 3, q: '1080', ts: 0, te: 3, mirror: true, v: 3 };
 const QUAL = {
   '4k':   { w: 3840, h: 2160, vbps: 24_000_000 },
   '1080': { w: 1920, h: 1080, vbps: 10_000_000 }, // ברירת מחדל: 1080x1920 - הגודל שאינסטגרם מציג
   '720':  { w: 1280, h: 720,  vbps: 6_000_000 },
 };
-let S = { ...DEF, ...safeJSON(localStorage.getItem(LS.settings)) };
+const savedS = safeJSON(localStorage.getItem(LS.settings));
+let S = { ...DEF, ...savedS };
 function safeJSON(s) { try { return JSON.parse(s) || {}; } catch { return {}; } }
 // הגירה: מי שנשאר על 4K מהגרסה הקודמת עובר ל-1080p (אפשר להחזיר בהגדרות)
-if ((S.v || 1) < 2) { if (S.q === '4k') S.q = '1080'; S.v = 2; localStorage.setItem(LS.settings, JSON.stringify(S)); }
+if ((savedS.v || 1) < 3) { S.q = '1080'; S.v = 3; localStorage.setItem(LS.settings, JSON.stringify(S)); }
 function saveSettings() { localStorage.setItem(LS.settings, JSON.stringify(S)); }
 
 const toastEl = $('toast'); let toastT;
@@ -143,14 +144,16 @@ function pickMime() {
 async function getStream() {
   const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 2 } };
   const q = QUAL[S.q] || QUAL['1080'];
+  // קודם בדיוק את הרזולוציה שנבחרה (exact), ואם המצלמה לא מסוגלת - בקשה גמישה
   const tries = [
-    { w: q.w, h: q.h }, { w: 1920, h: 1080 }, null,
+    { w: q.w, h: q.h, exact: true }, { w: q.w, h: q.h }, { w: 1920, h: 1080 }, null,
   ];
   let lastErr;
   for (const t of tries) {
     // max על שני הצדדים - כדי שהטלפון לא ייתן 4K גם כשביקשנו 1080p (בלי קשר לכיוון המסך)
     const lim = Math.max(q.w, q.h);
-    const video = t ? { facingMode: 'user', width: { ideal: t.w, max: lim }, height: { ideal: t.h, max: lim }, frameRate: { ideal: 30, min: 24 } } : { facingMode: 'user' };
+    const dim = (v) => t.exact ? { exact: v } : { ideal: v, max: lim };
+    const video = t ? { facingMode: 'user', width: dim(t.w), height: dim(t.h), frameRate: { ideal: 30 } } : { facingMode: 'user' };
     try {
       const s = await navigator.mediaDevices.getUserMedia({ video, audio });
       await fitRes(s, q); return s;
@@ -699,7 +702,7 @@ async function exportTakes(list, join, base) {
 
 /* ================= אתחול ================= */
 renderScript(); applyStyle(); updateHome();
-const env = ['גרסה 8'];
+const env = ['גרסה 9'];
 if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכתובת HTTPS.');
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));
