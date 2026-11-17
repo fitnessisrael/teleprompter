@@ -118,13 +118,15 @@ prompter.addEventListener('pointerup', () => {
 
 // לולאת גלילה
 let state = 'idle'; // idle | count | rec | review
-let paused = false, lastT = 0, scrolling = false, hist = [];
+let paused = false, lastT = 0, scrolling = false, hist = [], lastUi = 0;
+const recInfoEl = $('recInfo');
 function loop(t) {
   const dt = lastT ? Math.min(0.1, (t - lastT) / 1000) : 0; lastT = t;
   if (scrolling && !paused && !drag) { pos += S.speed * S.font * 0.11 * dt; applyPos(); }
-  if (state === 'rec') {
-    hist.push([t, pos]); if (hist.length > 20000) hist.splice(0, 5000);
-    $('recInfo').textContent = '● ' + fmt((t - recStartT) / 1000);
+  if (state === 'rec' && t - lastUi > 200) {
+    // פחות עבודה לדפדפן בזמן הקלטה = פחות פריימים שנופלים
+    lastUi = t; hist.push([t, pos]); if (hist.length > 20000) hist.splice(0, 5000);
+    recInfoEl.textContent = '● ' + fmt((t - recStartT) / 1000);
   }
   requestAnimationFrame(loop);
 }
@@ -162,9 +164,12 @@ async function getStream() {
 // אם המצלמה בכל זאת פתחה ברזולוציה גבוהה מהנבחרת - מורידים אותה
 async function fitRes(s, q) {
   const tr = s.getVideoTracks()[0]; const st = tr?.getSettings?.() || {};
-  if (Math.max(st.width || 0, st.height || 0) <= Math.max(q.w, q.h) * 1.05) return;
   const land = (st.width || 0) >= (st.height || 0);
-  try { await tr.applyConstraints({ width: land ? q.w : q.h, height: land ? q.h : q.w, frameRate: { ideal: 30 } }); } catch (e) { console.warn('applyConstraints', e); }
+  const tooBig = Math.max(st.width || 0, st.height || 0) > Math.max(q.w, q.h) * 1.05;
+  const dims = tooBig ? { width: land ? q.w : q.h, height: land ? q.h : q.w } : (st.width ? { width: st.width, height: st.height } : {});
+  // נעילה על 30 פריימים: באור חלש האייפון יורד לבד ל-15 פריימים כדי להאיר, וזה נראה "תקוע"
+  try { await tr.applyConstraints({ ...dims, frameRate: { min: 30, ideal: 30, max: 30 } }); return; } catch (e) { console.warn('fps lock', e); }
+  try { await tr.applyConstraints({ ...dims, frameRate: { ideal: 30 } }); } catch (e) { console.warn('applyConstraints', e); }
 }
 async function openCam() {
   renderScript(); applyStyle(); requestAnimationFrame(loadFrac);
@@ -261,10 +266,9 @@ function startRec() {
   catch { recorder = new MediaRecorder(stream, { mimeType: mime }); }
   recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
   recorder.onstop = onRecStop;
-  // MediaRecorder לא חושף מרווח בין פריימי מפתח (גם לא בספארי באייפון).
-  // start(1000) רק מרוקן נתונים כל שנייה, ולא מכריח keyframe.
-  // חיתוך בלי קידוד מחדש נצמד ל-keyframe הקרוב, בדרך כלל עד כשנייה–שתיים.
-  recorder.start(1000);
+  // בלי timeslice: בספארי הקלטה במקטעים יוצרת MP4 מפוצל, ובו האודיו והווידאו
+  // מתחילים לא מסונכרנים בשניות הראשונות. קובץ אחד רציף = סנכרון נקי.
+  recorder.start(); lastUi = 0;
   recStartT = performance.now(); takeStartPos = pos;
   state = 'rec'; scrolling = true; $('recBtn').className = 'recording'; $('recInfo').classList.add('rec');
   pending = { w: st.width, h: st.height, vbps };
@@ -700,7 +704,7 @@ async function exportTakes(list, join, base) {
 
 /* ================= אתחול ================= */
 renderScript(); applyStyle(); updateHome();
-const env = ['גרסה 6'];
+const env = ['גרסה 7'];
 if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכתובת HTTPS.');
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));
