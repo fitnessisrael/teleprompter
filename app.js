@@ -150,7 +150,7 @@ async function getStream() {
   for (const t of tries) {
     // max על שני הצדדים - כדי שהטלפון לא ייתן 4K גם כשביקשנו 1080p (בלי קשר לכיוון המסך)
     const lim = Math.max(q.w, q.h);
-    const video = t ? { facingMode: 'user', width: { ideal: t.w, max: lim }, height: { ideal: t.h, max: lim }, frameRate: { ideal: 30 } } : { facingMode: 'user' };
+    const video = t ? { facingMode: 'user', width: { ideal: t.w, max: lim }, height: { ideal: t.h, max: lim }, frameRate: { ideal: 30, min: 24 } } : { facingMode: 'user' };
     try {
       const s = await navigator.mediaDevices.getUserMedia({ video, audio });
       await fitRes(s, q); return s;
@@ -164,12 +164,9 @@ async function getStream() {
 // אם המצלמה בכל זאת פתחה ברזולוציה גבוהה מהנבחרת - מורידים אותה
 async function fitRes(s, q) {
   const tr = s.getVideoTracks()[0]; const st = tr?.getSettings?.() || {};
+  if (Math.max(st.width || 0, st.height || 0) <= Math.max(q.w, q.h) * 1.05) return;
   const land = (st.width || 0) >= (st.height || 0);
-  const tooBig = Math.max(st.width || 0, st.height || 0) > Math.max(q.w, q.h) * 1.05;
-  const dims = tooBig ? { width: land ? q.w : q.h, height: land ? q.h : q.w } : (st.width ? { width: st.width, height: st.height } : {});
-  // נעילה על 30 פריימים: באור חלש האייפון יורד לבד ל-15 פריימים כדי להאיר, וזה נראה "תקוע"
-  try { await tr.applyConstraints({ ...dims, frameRate: { min: 30, ideal: 30, max: 30 } }); return; } catch (e) { console.warn('fps lock', e); }
-  try { await tr.applyConstraints({ ...dims, frameRate: { ideal: 30 } }); } catch (e) { console.warn('applyConstraints', e); }
+  try { await tr.applyConstraints({ width: land ? q.w : q.h, height: land ? q.h : q.w, frameRate: { ideal: 30 } }); } catch (e) { console.warn('applyConstraints', e); }
 }
 async function openCam() {
   renderScript(); applyStyle(); requestAnimationFrame(loadFrac);
@@ -266,9 +263,7 @@ function startRec() {
   catch { recorder = new MediaRecorder(stream, { mimeType: mime }); }
   recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
   recorder.onstop = onRecStop;
-  // בלי timeslice: בספארי הקלטה במקטעים יוצרת MP4 מפוצל, ובו האודיו והווידאו
-  // מתחילים לא מסונכרנים בשניות הראשונות. קובץ אחד רציף = סנכרון נקי.
-  recorder.start(); lastUi = 0;
+  recorder.start(1000); lastUi = 0;
   recStartT = performance.now(); takeStartPos = pos;
   state = 'rec'; scrolling = true; $('recBtn').className = 'recording'; $('recInfo').classList.add('rec');
   pending = { w: st.width, h: st.height, vbps };
@@ -704,7 +699,7 @@ async function exportTakes(list, join, base) {
 
 /* ================= אתחול ================= */
 renderScript(); applyStyle(); updateHome();
-const env = ['גרסה 7'];
+const env = ['גרסה 8'];
 if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכתובת HTTPS.');
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));
