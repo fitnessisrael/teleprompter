@@ -220,7 +220,7 @@ const busyRec = () => state === 'rec' || state === 'count';
 $('recBtn').onclick = () => {
   if (state === 'idle') startCount();
   else if (state === 'count') cancelCount();
-  else if (state === 'rec') stopRec();
+  else if (state === 'rec') stopRecSoft();
 };
 let countGen = 0;
 function hideCountdown() {
@@ -280,6 +280,15 @@ function startRec() {
   recStartT = performance.now(); takeStartPos = pos;
   state = 'rec'; scrolling = true; $('recBtn').className = 'recording'; $('recInfo').classList.add('rec');
   pending = { w: st.width, h: st.height, vbps };
+}
+// עצירה רכה: ממשיכים להקליט עוד רגע אחרי הלחיצה, כי ספארי מאבד את הרבע-שנייה האחרונה
+// של האודיו והווידאו (השהיית הקידוד), וכך נחתכת המילה האחרונה
+let stopping = false;
+function stopRecSoft() {
+  if (state !== 'rec' || stopping) return;
+  stopping = true; scrolling = false; $('recBtn').className = 'counting';
+  $('recInfo').textContent = 'מסיים...';
+  setTimeout(() => { stopping = false; stopRec(); }, 900);
 }
 function stopRec() {
   if (state !== 'rec') return;
@@ -712,7 +721,7 @@ async function exportTakes(list, join, base) {
 
 /* ================= אתחול ================= */
 renderScript(); applyStyle(); updateHome();
-const env = ['גרסה 11'];
+const env = ['גרסה 12'];
 if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכתובת HTTPS.');
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));
