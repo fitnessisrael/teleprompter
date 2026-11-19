@@ -175,7 +175,10 @@ async function fitRes(s, q) {
   const land = (st.width || 0) >= (st.height || 0);
   try { await tr.applyConstraints({ width: land ? q.w : q.h, height: land ? q.h : q.w, frameRate: { ideal: 30 } }); } catch (e) { console.warn('applyConstraints', e); }
 }
-async function openCam() {
+let opening = null;
+// פתיחת מצלמה אחת בכל רגע: שתי פתיחות במקביל משאירות זרם יתום, ובאייפון התצוגה נהיית שחורה
+function openCam() { if (opening) return opening; opening = openCamInner().finally(() => { opening = null; }); return opening; }
+async function openCamInner() {
   renderScript(); applyStyle(); requestAnimationFrame(loadFrac);
   $('takesBadge2').textContent = takes.length;
   if (stream && stream.getVideoTracks()[0]?.readyState === 'live') return;
@@ -184,6 +187,9 @@ async function openCam() {
     stream = await getStream();
     if (!$('cam').classList.contains('active')) { stopStream(); return; }
     $('preview').srcObject = stream; await $('preview').play().catch(() => {});
+    // אם המצלמה נקטעה (שיחה, מעבר אפליקציה) - פותחים מחדש במקום להשאיר מסך שחור
+    stream.getVideoTracks()[0].addEventListener('ended', () => { if ($('cam').classList.contains('active') && state === 'idle') { stopStream(); setTimeout(openCam, 300); } });
+    setTimeout(() => { const v = $('preview'); if ($('cam').classList.contains('active') && stream && (v.paused || !v.videoWidth)) { v.play().catch(() => {}); if (!v.videoWidth) { stopStream(); openCam(); } } }, 1500);
     mime = pickMime();
     const st = stream.getVideoTracks()[0].getSettings();
     $('recInfo').textContent = `${st.width}×${st.height} · ${Math.round(st.frameRate || 30)}fps`;
@@ -706,7 +712,7 @@ async function exportTakes(list, join, base) {
 
 /* ================= אתחול ================= */
 renderScript(); applyStyle(); updateHome();
-const env = ['גרסה 10'];
+const env = ['גרסה 11'];
 if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכתובת HTTPS.');
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));
