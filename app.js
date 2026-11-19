@@ -1,7 +1,7 @@
 // פרומפטר - PWA סטטי. אין שרת, אין חשבונות, אין תלות ב-CDN.
 const $ = (id) => document.getElementById(id);
 const LS = { script: 'tp.script', pos: 'tp.pos', settings: 'tp.settings' };
-const DEF = { speed: 4, font: 34, ph: 36, cd: 3, q: '1080', ts: 0, te: 3, mirror: true, v: 3 };
+const DEF = { speed: 4, font: 34, ph: 36, cd: 3, q: '1080', ts: 0, te: 0, mirror: true, v: 4 };
 const QUAL = {
   '4k':   { w: 3840, h: 2160, vbps: 24_000_000 },
   '1080': { w: 1920, h: 1080, vbps: 10_000_000 }, // ברירת מחדל: 1080x1920 - הגודל שאינסטגרם מציג
@@ -11,7 +11,9 @@ const savedS = safeJSON(localStorage.getItem(LS.settings));
 let S = { ...DEF, ...savedS };
 function safeJSON(s) { try { return JSON.parse(s) || {}; } catch { return {}; } }
 // הגירה: מי שנשאר על 4K מהגרסה הקודמת עובר ל-1080p (אפשר להחזיר בהגדרות)
-if ((savedS.v || 1) < 3) { S.q = '1080'; S.v = 3; localStorage.setItem(LS.settings, JSON.stringify(S)); }
+const needTrimReset = (savedS.v || 1) < 4;
+if ((savedS.v || 1) < 3) S.q = '1080';
+if (needTrimReset) { S.ts = 0; S.te = 0; S.v = 4; localStorage.setItem(LS.settings, JSON.stringify(S)); } // כיבוי חיתוך אוטומטי
 function saveSettings() { localStorage.setItem(LS.settings, JSON.stringify(S)); }
 
 const toastEl = $('toast'); let toastT;
@@ -35,6 +37,8 @@ const dbClear = () => idb('readwrite', (st) => st.clear());
 if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 
 let takes = ((await dbAll().catch(() => [])) || []).sort((a, b) => a.created - b.created);
+// טייקים שנשמרו עם החיתוך האוטומטי הישן (3 שניות בסוף, בלי שהמשתמש ביקש) - מאפסים אותם
+if (needTrimReset) for (const t of takes) { if (t.ts === 0 && t.te === 3) { t.te = 0; dbPut(t).catch(() => {}); } }
 
 /* ================= מסכים ================= */
 function show(id) {
@@ -702,7 +706,7 @@ async function exportTakes(list, join, base) {
 
 /* ================= אתחול ================= */
 renderScript(); applyStyle(); updateHome();
-const env = ['גרסה 9'];
+const env = ['גרסה 10'];
 if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכתובת HTTPS.');
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));
