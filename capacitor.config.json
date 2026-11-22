@@ -1,0 +1,6 @@
+{
+  "appId": "com.fitnessisrael.teleprompter",
+  "appName": "פרומפטר",
+  "webDir": "www",
+  "ios": { "contentInset": "never" }
+}

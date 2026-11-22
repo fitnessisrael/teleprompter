@@ -1,3 +1,8 @@
+// אפליקציית אייפון (Capacitor): מצלמה נייטיבית במקום MediaRecorder של ספארי - בלי דיליי
+const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const Cam = NATIVE ? window.Capacitor.registerPlugin('NativeCam') : null;
+if (NATIVE) document.documentElement.classList.add('native');
+let nativeSaved = 0;
 // פרומפטר - PWA סטטי. אין שרת, אין חשבונות, אין תלות ב-CDN.
 const $ = (id) => document.getElementById(id);
 const LS = { script: 'tp.script', pos: 'tp.pos', settings: 'tp.settings' };
@@ -106,7 +111,7 @@ function changeFont(d) { storeFrac(); S.font = Math.min(80, Math.max(18, S.font 
 function changeSpeed(d) { S.speed = Math.min(20, Math.max(1, +(S.speed + d).toFixed(1))); saveSettings(); applyStyle(); syncSettingsUI(); }
 $('fontUp').onclick = () => changeFont(2); $('fontDown').onclick = () => changeFont(-2);
 $('speedUp').onclick = () => changeSpeed(0.5); $('speedDown').onclick = () => changeSpeed(-0.5);
-$('mirrorBtn').onclick = () => { S.mirror = !S.mirror; saveSettings(); applyStyle(); };
+$('mirrorBtn').onclick = () => { S.mirror = !S.mirror; saveSettings(); applyStyle(); if (NATIVE) Cam.setMirror({ mirror: S.mirror }).catch(() => {}); };
 
 // גרירה להזזת התסריט (כשלא מקליטים), הקשה = השהיה/המשך בזמן הקלטה
 let drag = null;
@@ -181,6 +186,14 @@ function openCam() { if (opening) return opening; opening = openCamInner().final
 async function openCamInner() {
   renderScript(); applyStyle(); requestAnimationFrame(loadFrac);
   $('takesBadge2').textContent = takes.length;
+  if (NATIVE) {
+    try {
+      const r = await Cam.start({ mirror: S.mirror });
+      document.documentElement.classList.add('camlive');
+      $('recInfo').textContent = `${r.width}×${r.height} · ${r.fps}fps · נייטיבי`;
+    } catch (e) { toast('לא הצלחתי לפתוח מצלמה: ' + (e.message || e), 6000); }
+    return;
+  }
   if (stream && stream.getVideoTracks()[0]?.readyState === 'live') return;
   if (!navigator.mediaDevices?.getUserMedia) { toast('הדפדפן לא מאפשר גישה למצלמה. צריך HTTPS וספארי עדכני.', 6000); return; }
   try {
@@ -199,7 +212,9 @@ async function openCamInner() {
     toast(e.name === 'NotAllowedError' ? 'אין הרשאה למצלמה. אפשר בהגדרות ספארי > מצלמה ומיקרופון.' : 'לא הצלחתי לפתוח מצלמה: ' + e.name, 6000);
   }
 }
-function stopStream() { stream?.getTracks().forEach((t) => t.stop()); stream = null; $('preview').srcObject = null; }
+function stopStream() {
+  if (NATIVE) { Cam.stop().catch(() => {}); document.documentElement.classList.remove('camlive'); return; }
+  stream?.getTracks().forEach((t) => t.stop()); stream = null; $('preview').srcObject = null; }
 function closeCam() {
   if (state === 'rec') stopRec();
   if (state === 'count') cancelCount();
@@ -209,6 +224,7 @@ function closeCam() {
 document.addEventListener('visibilitychange', async () => {
   if (document.hidden) { if (state === 'rec') stopRec(); }
   else if ($('cam').classList.contains('active')) {
+    if (NATIVE) { openCam(); return; }
     if (!stream || stream.getVideoTracks()[0]?.readyState !== 'live') { stopStream(); openCam(); }
     try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
   }
@@ -246,8 +262,8 @@ function armCountdownHide() {
   setTimeout(run, 400);
 }
 function startCount() {
-  if (!stream) { openCam(); return; }
-  if (!mime) { toast('הדפדפן לא תומך בהקלטת וידאו (MediaRecorder).', 5000); return; }
+  if (!NATIVE && !stream) { openCam(); return; }
+  if (!NATIVE && !mime) { toast('הדפדפן לא תומך בהקלטת וידאו (MediaRecorder).', 5000); return; }
   $('settings').hidden = true;
   clearTimeout(countT);
   let n = +S.cd; state = 'count'; $('recBtn').className = 'counting';
@@ -268,6 +284,16 @@ function startRec() {
   clearTimeout(countT); countT = null;
   armCountdownHide();
   chunks = []; hist = []; paused = false; $('pausedTag').hidden = true;
+  if (NATIVE) {
+    recStartT = performance.now(); takeStartPos = pos; lastUi = 0;
+    state = 'rec'; scrolling = true; $('recBtn').className = 'recording'; $('recInfo').classList.add('rec');
+    pending = { w: 1920, h: 1080 };
+    Cam.startRecording().catch((e) => {
+      toast('שגיאת הקלטה: ' + (e.message || e), 5000);
+      state = 'idle'; scrolling = false; pending = null; $('recBtn').className = ''; $('recInfo').classList.remove('rec');
+    });
+    return;
+  }
   const q = QUAL[S.q] || QUAL['1080'];
   const st = stream.getVideoTracks()[0].getSettings();
   const px = (st.width || 1920) * (st.height || 1080);
@@ -299,6 +325,14 @@ function stopRec() {
   const target = stopT - S.te * 1000;
   let back = takeStartPos; for (const [t, p] of hist) { if (t <= target) back = p; else break; }
   pending.stopPos = pos; pending.resumePos = back; pending.dur = (stopT - recStartT) / 1000;
+  if (NATIVE) {
+    Cam.stopRecording().then((r) => {
+      pending.path = r.path; pending.dur = r.duration || pending.dur;
+      const v = $('reviewVideo'); v.src = window.Capacitor.convertFileSrc(r.path);
+      $('review').hidden = false; v.play().catch(() => {});
+    }).catch((e) => { toast('שגיאת עצירה: ' + (e.message || e), 5000); state = 'idle'; pending = null; });
+    return;
+  }
   try { recorder.requestData?.(); } catch {}
   recorder.stop();
 }
@@ -312,6 +346,14 @@ function onRecStop() {
 }
 $('keepBtn').onclick = async () => {
   const p = pending; if (!p) return;
+  if (NATIVE) {
+    try {
+      await Cam.saveToPhotos({ path: p.path });
+      nativeSaved++; pos = p.resumePos; applyPos(); storeFrac();
+      closeReview(); toast(`טייק ${nativeSaved} נשמר בגלריה ✓`, 2000);
+    } catch (e) { toast('לא נשמר בגלריה: ' + (e.message || e), 6000); }
+    return;
+  }
   const take = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), created: Date.now(), blob: p.blob, type: p.type,
     dur: p.dur, w: p.w, h: p.h, ts: +S.ts, te: Math.min(+S.te, Math.max(0, p.dur - 1)) };
   const v = $('reviewVideo'); if (isFinite(v.duration) && v.duration > 0) take.dur = v.duration;
@@ -320,11 +362,11 @@ $('keepBtn').onclick = async () => {
   pos = p.resumePos; applyPos(); storeFrac();
   closeReview(); toast(`טייק ${takes.length} נשמר ✓`, 1500);
 };
-$('retakeBtn').onclick = () => { pos = takeStartPos; applyPos(); storeFrac(); closeReview(); toast('נמחק. מצלמים שוב מאותה נקודה', 1500); };
+$('retakeBtn').onclick = () => { if (NATIVE && pending?.path) Cam.deleteFile({ path: pending.path }).catch(() => {}); pos = takeStartPos; applyPos(); storeFrac(); closeReview(); toast('נמחק. מצלמים שוב מאותה נקודה', 1500); };
 function closeReview() {
   const v = $('reviewVideo'); v.pause(); URL.revokeObjectURL(v.src); v.removeAttribute('src'); v.load();
   $('review').hidden = true; pending = null; state = 'idle';
-  $('takesBadge2').textContent = takes.length;
+  $('takesBadge2').textContent = NATIVE ? nativeSaved : takes.length;
   const st = stream?.getVideoTracks()[0]?.getSettings(); if (st) $('recInfo').textContent = `${st.width}×${st.height}`;
 }
 
@@ -721,12 +763,12 @@ async function exportTakes(list, join, base) {
 
 /* ================= אתחול ================= */
 renderScript(); applyStyle(); updateHome();
-const env = ['גרסה 12'];
+const env = ['גרסה 13'];
 if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכתובת HTTPS.');
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));
 $('envInfo').textContent = env.join(' ');
-if ('serviceWorker' in navigator && window.isSecureContext) {
+if (!NATIVE && 'serviceWorker' in navigator && window.isSecureContext) {
   const hadWorker = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
   // טלפון שכבר שמר את הגרסה הקודמת יטען מחדש ברגע שהמטמון החדש משתלט

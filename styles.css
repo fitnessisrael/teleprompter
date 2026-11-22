@@ -120,3 +120,8 @@ progress{width:100%;height:10px;accent-color:var(--acc)}
 
 .take{transition:box-shadow .3s}
 .take.flash{box-shadow:0 0 0 3px #4a8cff}
+
+/* אפליקציית אייפון: המצלמה הנייטיבית יושבת מאחורי ה-WebView */
+html.native.camlive,html.native.camlive body,html.native.camlive #cam.screen{background:transparent}
+html.native #preview{display:none}
+html.native #camTakes,html.native #goTakes{display:none}
