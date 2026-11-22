@@ -43,6 +43,8 @@ jobs:
           # ה-WebView הראשי הופך ל-MainViewController שרושם את התוסף
           sed -i '' 's/customClass="CAPBridgeViewController" customModule="Capacitor"/customClass="MainViewController" customModule="App"/' ios/App/App/Base.lproj/Main.storyboard
           grep -n MainViewController ios/App/App/Base.lproj/Main.storyboard
+          # בדיקה שהקבצים באמת בתוך ה-target (אחרת האפליקציה תקרוס בהפעלה)
+          grep -q PBXFileSystemSynchronizedRootGroup ios/App/App.xcodeproj/project.pbxproj && echo "synced folders" || { grep -c "NativeCamPlugin.swift in Sources" ios/App/App.xcodeproj/project.pbxproj | grep -qv '^0$' && grep -c "MainViewController.swift in Sources" ios/App/App.xcodeproj/project.pbxproj | grep -qv '^0$' || { echo "FILES NOT IN TARGET"; exit 1; }; }
           P=ios/App/App/Info.plist
           /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'פרומפטר משתמש במצלמה כדי לצלם אותך בזמן שאתה קורא את הטקסט.'" $P
           /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'פרומפטר משתמש במיקרופון כדי להקליט את הקול שלך.'" $P
@@ -56,9 +58,12 @@ jobs:
           sed -i '' 's/TARGETED_DEVICE_FAMILY = "1,2"/TARGETED_DEVICE_FAMILY = 1/' ios/App/App.xcodeproj/project.pbxproj
       - name: Compile check (simulator, unsigned)
         run: |
+          set -o pipefail
           cd ios/App
           xcodebuild build -workspace App.xcworkspace -scheme App -configuration Debug \
-            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO 2>&1 | tail -60
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO 2>&1 | tee $RUNNER_TEMP/build.log | grep -E "error:|warning: .*(NativeCam|MainView)|BUILD" || true
+          grep -E "SwiftCompile.*(NativeCamPlugin|MainViewController)" $RUNNER_TEMP/build.log | head -4
+          grep -q "BUILD SUCCEEDED" $RUNNER_TEMP/build.log
       - name: API key file
         if: ${{ inputs.upload }}
         env: { ASC_KEY: "${{ secrets.ASC_KEY }}" }
