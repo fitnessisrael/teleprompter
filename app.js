@@ -26,11 +26,16 @@ function toast(msg, ms = 2600) { toastEl.textContent = msg; toastEl.hidden = fal
 const fmt = (s) => { s = Math.max(0, s || 0); const m = Math.floor(s / 60); return `${m}:${(s % 60).toFixed(1).padStart(4, '0')}`; };
 
 /* ================= IndexedDB (טייקים שורדים רענון) ================= */
-const db = await new Promise((res, rej) => {
-  const r = indexedDB.open('teleprompter', 1);
-  r.onupgradeneeded = () => r.result.createObjectStore('takes', { keyPath: 'id' });
-  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-}).catch((e) => { console.warn('IDB unavailable', e); return null; });
+// באפליקציית האייפון הטייקים נשמרים ישר לגלריה, ואין צורך ב-IndexedDB.
+// ב-WebView של אפל פתיחתו יכולה להיתקע לגמרי ולתקוע את כל הכפתורים, לכן יש גם הגבלת זמן.
+const db = NATIVE ? null : await Promise.race([
+  new Promise((res, rej) => {
+    const r = indexedDB.open('teleprompter', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('takes', { keyPath: 'id' });
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }),
+  new Promise((res) => setTimeout(() => res(null), 3000)),
+]).catch((e) => { console.warn('IDB unavailable', e); return null; });
 function idb(mode, fn) {
   if (!db) return Promise.resolve();
   return new Promise((res, rej) => { const tx = db.transaction('takes', mode); const st = tx.objectStore('takes'); const out = fn(st); tx.oncomplete = () => res(out && out.result); tx.onerror = () => rej(tx.error); });
@@ -763,7 +768,7 @@ async function exportTakes(list, join, base) {
 
 /* ================= אתחול ================= */
 renderScript(); applyStyle(); updateHome();
-const env = ['גרסה 13'];
+const env = ['גרסה 14'];
 if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכתובת HTTPS.');
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));
