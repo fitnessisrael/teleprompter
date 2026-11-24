@@ -1,6 +1,14 @@
 // אפליקציית אייפון (Capacitor): מצלמה נייטיבית במקום MediaRecorder של ספארי - בלי דיליי
 const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-const Cam = NATIVE ? window.Capacitor.registerPlugin('NativeCam') : null;
+// חיבור לתוסף המצלמה: קודם דרך Plugins (התוסף רשום מצד אייפון), ואם אין - registerPlugin
+function getCamPlugin() {
+  const C = window.Capacitor;
+  if (C.Plugins && C.Plugins.NativeCam) return C.Plugins.NativeCam;
+  if (typeof C.registerPlugin === 'function') return C.registerPlugin('NativeCam');
+  throw new Error('Capacitor בלי registerPlugin; מפתחות: ' + Object.keys(C).join(','));
+}
+let Cam = null, camInitErr = '';
+if (NATIVE) { try { Cam = getCamPlugin(); } catch (e) { camInitErr = (e && e.message) || String(e); } }
 if (NATIVE) document.documentElement.classList.add('native');
 let nativeSaved = 0;
 // חלונית שגיאות באפליקציית האייפון: מציגה על המסך כל שגיאה, כדי שאפשר יהיה לצלם ולשלוח
@@ -16,6 +24,7 @@ const dbg = (() => {
   window.addEventListener('unhandledrejection', (e) => log('REJ ' + (e.reason && (e.reason.message || e.reason))));
   return log;
 })();
+if (camInitErr) dbg('CAM PLUGIN INIT: ' + camInitErr);
 // פרומפטר - PWA סטטי. אין שרת, אין חשבונות, אין תלות ב-CDN.
 const $ = (id) => document.getElementById(id);
 const LS = { script: 'tp.script', pos: 'tp.pos', settings: 'tp.settings' };
@@ -781,7 +790,7 @@ async function exportTakes(list, join, base) {
 
 /* ================= אתחול ================= */
 renderScript(); applyStyle(); updateHome();
-const env = ['גרסה 16'];
+const env = ['גרסה 17'];
 if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכתובת HTTPS.');
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));
