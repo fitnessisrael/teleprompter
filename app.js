@@ -3,6 +3,19 @@ const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && windo
 const Cam = NATIVE ? window.Capacitor.registerPlugin('NativeCam') : null;
 if (NATIVE) document.documentElement.classList.add('native');
 let nativeSaved = 0;
+// חלונית שגיאות באפליקציית האייפון: מציגה על המסך כל שגיאה, כדי שאפשר יהיה לצלם ולשלוח
+const dbg = (() => {
+  if (!NATIVE) return () => {};
+  const box = document.createElement('pre');
+  box.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;margin:0;padding:8px 10px calc(8px + env(safe-area-inset-bottom));max-height:45vh;overflow:auto;background:rgba(140,0,0,.94);color:#fff;font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;direction:ltr;text-align:left;display:none';
+  box.onclick = () => { box.style.display = 'none'; };
+  const add = () => document.body.appendChild(box);
+  document.body ? add() : document.addEventListener('DOMContentLoaded', add);
+  const log = (m) => { box.textContent += (box.textContent ? '\n' : '') + String(m).slice(0, 400); box.style.display = 'block'; };
+  window.addEventListener('error', (e) => log('ERR ' + e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno));
+  window.addEventListener('unhandledrejection', (e) => log('REJ ' + (e.reason && (e.reason.message || e.reason))));
+  return log;
+})();
 // פרומפטר - PWA סטטי. אין שרת, אין חשבונות, אין תלות ב-CDN.
 const $ = (id) => document.getElementById(id);
 const LS = { script: 'tp.script', pos: 'tp.pos', settings: 'tp.settings' };
@@ -59,7 +72,7 @@ function show(id) {
   if (id === 'takes') renderTakes();
   if (id === 'home') updateHome();
 }
-$('goCam').onclick = () => show('cam');
+$('goCam').onclick = () => { if (NATIVE) toast('פותח מצלמה...', 1500); show('cam'); };
 $('goTakes').onclick = () => show('takes');
 $('camTakes').onclick = () => { if (!busyRec()) show('takes'); };
 $('camBack').onclick = () => { if (!busyRec()) show('home'); };
@@ -196,7 +209,7 @@ async function openCamInner() {
       const r = await Cam.start({ mirror: S.mirror });
       document.documentElement.classList.add('camlive');
       $('recInfo').textContent = `${r.width}×${r.height} · ${r.fps}fps · נייטיבי`;
-    } catch (e) { toast('לא הצלחתי לפתוח מצלמה: ' + (e.message || e), 6000); }
+    } catch (e) { toast('לא הצלחתי לפתוח מצלמה: ' + (e.message || e), 6000); dbg('CAM START FAIL: ' + (e.message || JSON.stringify(e))); }
     return;
   }
   if (stream && stream.getVideoTracks()[0]?.readyState === 'live') return;
@@ -768,7 +781,7 @@ async function exportTakes(list, join, base) {
 
 /* ================= אתחול ================= */
 renderScript(); applyStyle(); updateHome();
-const env = ['גרסה 14'];
+const env = ['גרסה 15'];
 if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכתובת HTTPS.');
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));
