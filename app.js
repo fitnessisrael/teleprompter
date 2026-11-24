@@ -62,13 +62,20 @@ function idb(mode, fn) {
   if (!db) return Promise.resolve();
   return new Promise((res, rej) => { const tx = db.transaction('takes', mode); const st = tx.objectStore('takes'); const out = fn(st); tx.oncomplete = () => res(out && out.result); tx.onerror = () => rej(tx.error); });
 }
-const dbAll = () => idb('readonly', (st) => st.getAll());
-const dbPut = (t) => idb('readwrite', (st) => st.put(t));
-const dbDel = (id) => idb('readwrite', (st) => st.delete(id));
-const dbClear = () => idb('readwrite', (st) => st.clear());
+// באפליקציית האייפון: רשימת הטייקים נשמרת ב-localStorage, והקבצים עצמם בתיקיית האפליקציה
+const ntRead = () => { try { return JSON.parse(localStorage.getItem('tp.ntakes') || '[]'); } catch { return []; } };
+const ntWrite = (a) => { try { localStorage.setItem('tp.ntakes', JSON.stringify(a)); } catch {} };
+const ntStrip = (t) => { const { path, blob, ...rest } = t; return rest; };
+const dbAll = NATIVE ? () => Promise.resolve(ntRead()) : () => idb('readonly', (st) => st.getAll());
+const dbPut = NATIVE ? (t) => { ntWrite([...ntRead().filter((x) => x.id !== t.id), ntStrip(t)]); return Promise.resolve(); } : (t) => idb('readwrite', (st) => st.put(t));
+const dbDel = NATIVE ? (id) => { ntWrite(ntRead().filter((x) => x.id !== id)); return Promise.resolve(); } : (id) => idb('readwrite', (st) => st.delete(id));
+const dbClear = NATIVE ? () => { ntWrite([]); return Promise.resolve(); } : () => idb('readwrite', (st) => st.clear());
 if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 
+let NATIVE_DIR = '';
+if (NATIVE) { try { NATIVE_DIR = (await Cam.info()).dir; } catch (e) { dbg('CAM INFO FAIL: ' + (e.message || e)); } }
 let takes = ((await dbAll().catch(() => [])) || []).sort((a, b) => a.created - b.created);
+if (NATIVE) takes.forEach((t) => { t.path = NATIVE_DIR + '/' + t.file; });
 // טייקים שנשמרו עם החיתוך האוטומטי הישן (3 שניות בסוף, בלי שהמשתמש ביקש) - מאפסים אותם
 if (needTrimReset) for (const t of takes) { if (t.ts === 0 && t.te === 3) { t.te = 0; dbPut(t).catch(() => {}); } }
 
@@ -314,7 +321,7 @@ function startRec() {
   if (NATIVE) {
     recStartT = performance.now(); takeStartPos = pos; lastUi = 0;
     state = 'rec'; scrolling = true; $('recBtn').className = 'recording'; $('recInfo').classList.add('rec');
-    pending = { w: 1920, h: 1080 };
+    pending = { w: 1920, h: 1080, dur: 0 };
     Cam.startRecording().catch((e) => {
       toast('שגיאת הקלטה: ' + (e.message || e), 5000);
       state = 'idle'; scrolling = false; pending = null; $('recBtn').className = ''; $('recInfo').classList.remove('rec');
@@ -374,11 +381,11 @@ function onRecStop() {
 $('keepBtn').onclick = async () => {
   const p = pending; if (!p) return;
   if (NATIVE) {
-    try {
-      await Cam.saveToPhotos({ path: p.path });
-      nativeSaved++; pos = p.resumePos; applyPos(); storeFrac();
-      closeReview(); toast(`טייק ${nativeSaved} נשמר בגלריה ✓`, 2000);
-    } catch (e) { toast('לא נשמר בגלריה: ' + (e.message || e), 6000); }
+    const nt = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), created: Date.now(), path: p.path, file: p.path.split('/').pop(),
+      type: 'video/quicktime', dur: p.dur || 0, w: 1920, h: 1080, ts: +S.ts, te: +S.te };
+    takes.push(nt); await dbPut(nt);
+    pos = p.resumePos; applyPos(); storeFrac();
+    closeReview(); toast(`טייק ${takes.length} נשמר ✓`, 1500);
     return;
   }
   const take = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), created: Date.now(), blob: p.blob, type: p.type,
@@ -393,7 +400,8 @@ $('retakeBtn').onclick = () => { if (NATIVE && pending?.path) Cam.deleteFile({ p
 function closeReview() {
   const v = $('reviewVideo'); v.pause(); URL.revokeObjectURL(v.src); v.removeAttribute('src'); v.load();
   $('review').hidden = true; pending = null; state = 'idle';
-  $('takesBadge2').textContent = NATIVE ? nativeSaved : takes.length;
+  $('takesBadge2').textContent = takes.length;
+  if (NATIVE) openCam();  // מוודא שהמצלמה פעילה לטייק הבא
   const st = stream?.getVideoTracks()[0]?.getSettings(); if (st) $('recInfo').textContent = `${st.width}×${st.height}`;
 }
 
@@ -431,7 +439,7 @@ $('s_q').onchange = (e) => { S.q = e.target.value; saveSettings(); stopStream();
 
 /* ================= טייקים: רשימה, חיתוך, ייצוא ================= */
 const urls = new Map();
-const urlFor = (t) => { if (!urls.has(t.id)) urls.set(t.id, URL.createObjectURL(t.blob)); return urls.get(t.id); };
+const urlFor = (t) => { if (!urls.has(t.id)) urls.set(t.id, NATIVE ? window.Capacitor.convertFileSrc(t.path) : URL.createObjectURL(t.blob)); return urls.get(t.id); };
 const ext = (type) => (type.includes('webm') ? 'webm' : 'mp4');
 const keepDur = (t) => Math.max(0.1, t.dur - t.ts - t.te);
 const needsTrim = (t) => t.ts > 0.05 || t.te > 0.05;
@@ -456,6 +464,7 @@ function renderTakes() {
     el.querySelector('[data-a=save]').onclick = () => exportTakes([t], false, `take-${i + 1}`);
     el.querySelector('[data-a=del]').onclick = async () => {
       if (!confirm(`למחוק את טייק ${i + 1}?`)) return;
+      if (NATIVE && t.path) Cam.deleteFile({ path: t.path }).catch(() => {});
       takes = takes.filter((x) => x !== t); URL.revokeObjectURL(urls.get(t.id)); urls.delete(t.id);
       await dbDel(t.id).catch(() => {}); renderTakes(); updateHome();
     };
@@ -693,6 +702,7 @@ $('saveAll').onclick = () => exportTakes(takes, false, 'take');
 $('joinAll').onclick = () => exportTakes(takes, true, 'video');
 $('clearAll').onclick = async () => {
   if (!confirm('למחוק את כל הטייקים ולהתחיל סשן חדש? (קבצים שכבר נשמרו לתמונות לא יימחקו)')) return;
+  if (NATIVE) takes.forEach((t) => Cam.deleteFile({ path: t.path }).catch(() => {}));
   urls.forEach((u) => URL.revokeObjectURL(u)); urls.clear(); takes = []; await dbClear().catch(() => {});
   setFrac(0); renderTakes(); updateHome(); toast('סשן חדש. התסריט יתחיל מההתחלה');
 };
@@ -729,7 +739,16 @@ const proc = { el: $('proc'), title: $('procTitle'), bar: $('procBar'), msg: $('
 proc.close.onclick = () => { proc.el.hidden = true; proc.save.hidden = true; proc.save.onclick = null; };
 function procOpen(title) { proc.title.textContent = title; proc.bar.removeAttribute('value'); proc.msg.textContent = ''; proc.save.hidden = true; proc.el.hidden = false; }
 
+async function nativeExport(list, join) {
+  if (!list.length) return;
+  toast(join ? 'מחבר ושומר לגלריה... (זה לוקח רגע)' : 'שומר לגלריה...', 120000);
+  try {
+    const r = await Cam.exportToPhotos({ join, items: list.map((t) => ({ path: t.path, ts: t.ts || 0, te: t.te || 0 })) });
+    toast(join ? 'הסרטון המחובר נשמר בגלריה ✓' : `נשמר בגלריה ✓ (${r.saved})`, 3500);
+  } catch (e) { toast('לא נשמר: ' + (e.message || e), 8000); }
+}
 async function exportTakes(list, join, base) {
+  if (NATIVE) return nativeExport(list, join);
   if (!list.length) return;
   const s = stamp();
   // בלי חיתוך ובלי חיבור: שומרים את הקובץ המקורי מייד (בלי עיבוד, איכות מקורית)
@@ -790,7 +809,7 @@ async function exportTakes(list, join, base) {
 
 /* ================= אתחול ================= */
 renderScript(); applyStyle(); updateHome();
-const env = ['גרסה 18'];
+const env = ['גרסה 19'];
 if (!window.isSecureContext) env.push('⚠️ המצלמה עובדת רק בכתובת HTTPS.');
 if (!window.MediaRecorder) env.push('⚠️ הדפדפן לא תומך בהקלטה.');
 else env.push('פורמט הקלטה: ' + (pickMime() || 'לא נתמך'));

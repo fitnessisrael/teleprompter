@@ -124,4 +124,3 @@ progress{width:100%;height:10px;accent-color:var(--acc)}
 /* אפליקציית אייפון: המצלמה הנייטיבית יושבת מאחורי ה-WebView */
 html.native.camlive,html.native.camlive body,html.native.camlive #cam.screen{background:transparent}
 html.native #preview{display:none}
-html.native #camTakes,html.native #goTakes{display:none}

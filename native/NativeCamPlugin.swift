@@ -23,6 +23,8 @@ public class NativeCamPlugin: CAPPlugin, CAPBridgedPlugin, AVCaptureFileOutputRe
         CAPPluginMethod(name: "stopRecording", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveToPhotos", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "deleteFile", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "info", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "exportToPhotos", returnType: CAPPluginReturnPromise),
     ]
 
     private let session = AVCaptureSession()
@@ -177,7 +179,9 @@ public class NativeCamPlugin: CAPPlugin, CAPBridgedPlugin, AVCaptureFileOutputRe
 
     @objc func startRecording(_ call: CAPPluginCall) {
         queue.async {
-            guard self.session.isRunning else { call.reject("המצלמה לא פעילה"); return }
+            // ריפוי עצמי: אם המצלמה נעצרה (למשל אחרי ניגון סרטון או הפרעה), מפעילים אותה מחדש
+            if !self.session.isRunning { self.session.startRunning() }
+            guard self.session.isRunning else { call.reject("המצלמה לא פעילה. בדוק שאין שיחה או אפליקציה אחרת שמשתמשת במצלמה"); return }
             if self.movieOutput.isRecording { call.reject("כבר מקליט"); return }
             let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("takes", isDirectory: true)
@@ -237,5 +241,117 @@ public class NativeCamPlugin: CAPPlugin, CAPBridgedPlugin, AVCaptureFileOutputRe
     @objc func deleteFile(_ call: CAPPluginCall) {
         if let path = call.getString("path") { try? FileManager.default.removeItem(atPath: path) }
         call.resolve()
+    }
+
+    private var takesDir: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("takes", isDirectory: true)
+    }
+
+    @objc func info(_ call: CAPPluginCall) {
+        try? FileManager.default.createDirectory(at: takesDir, withIntermediateDirectories: true)
+        call.resolve(["dir": takesDir.path])
+    }
+
+    // ---------- ייצוא לגלריה: טייק-טייק (עם חיתוך אם יש) או חיבור של הכול לסרטון אחד ----------
+    private func trimRange(_ it: [String: Any], _ asset: AVURLAsset) async throws -> (CMTimeRange, Bool) {
+        let total = try await asset.load(.duration).seconds
+        let ts = max(0, (it["ts"] as? NSNumber)?.doubleValue ?? 0)
+        let te = max(0, (it["te"] as? NSNumber)?.doubleValue ?? 0)
+        let start = min(ts, max(0, total - 0.1))
+        let end = min(total, max(start + 0.1, total - te))
+        let r = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600),
+                            end: CMTime(seconds: end, preferredTimescale: 600))
+        return (r, ts > 0.05 || te > 0.05)
+    }
+
+    private func runExport(_ asset: AVAsset, _ range: CMTimeRange?) async throws -> URL {
+        guard let ex = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+            throw NSError(domain: "cam", code: 3, userInfo: [NSLocalizedDescriptionKey: "לא ניתן לייצא את הסרטון"])
+        }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("export-\(UUID().uuidString).mov")
+        ex.outputURL = out
+        ex.outputFileType = .mov
+        if let r = range { ex.timeRange = r }
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            ex.exportAsynchronously { c.resume() }
+        }
+        guard ex.status == .completed else {
+            throw ex.error ?? NSError(domain: "cam", code: 4, userInfo: [NSLocalizedDescriptionKey: "הייצוא נכשל"])
+        }
+        return out
+    }
+
+    private func buildOne(_ it: [String: Any]) async throws -> URL {
+        guard let path = it["path"] as? String else {
+            throw NSError(domain: "cam", code: 5, userInfo: [NSLocalizedDescriptionKey: "חסר נתיב"])
+        }
+        let url = URL(fileURLWithPath: path)
+        let asset = AVURLAsset(url: url)
+        let (r, trimmed) = try await trimRange(it, asset)
+        if !trimmed { return url }  // בלי חיתוך: שומרים את הקובץ המקורי כמו שהוא
+        return try await runExport(asset, r)
+    }
+
+    private func buildJoined(_ items: [[String: Any]]) async throws -> URL {
+        let comp = AVMutableComposition()
+        guard let vTrack = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
+              let aTrack = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw NSError(domain: "cam", code: 6, userInfo: [NSLocalizedDescriptionKey: "לא ניתן לחבר"])
+        }
+        var cursor = CMTime.zero
+        var first = true
+        for it in items {
+            guard let path = it["path"] as? String else { continue }
+            let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+            let (r, _) = try await trimRange(it, asset)
+            if let sv = try await asset.loadTracks(withMediaType: .video).first {
+                try vTrack.insertTimeRange(r, of: sv, at: cursor)
+                if first { vTrack.preferredTransform = try await sv.load(.preferredTransform); first = false }
+            }
+            if let sa = try await asset.loadTracks(withMediaType: .audio).first {
+                try aTrack.insertTimeRange(r, of: sa, at: cursor)
+            }
+            cursor = CMTimeAdd(cursor, r.duration)
+        }
+        return try await runExport(comp, nil)
+    }
+
+    private func saveAll(_ urls: [URL]) async throws {
+        try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges({
+                for u in urls { _ = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: u) }
+            }) { ok, err in
+                if ok { c.resume() } else {
+                    c.resume(throwing: err ?? NSError(domain: "cam", code: 7, userInfo: [NSLocalizedDescriptionKey: "השמירה נכשלה"]))
+                }
+            }
+        }
+    }
+
+    @objc func exportToPhotos(_ call: CAPPluginCall) {
+        guard let items = call.getArray("items") as? [[String: Any]], !items.isEmpty else {
+            call.reject("אין טייקים לשמירה"); return
+        }
+        let join = call.getBool("join") ?? false
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                call.reject("אין הרשאה לשמור לגלריה. אפשר בהגדרות האייפון > פרומפטר > תמונות")
+                return
+            }
+            Task {
+                do {
+                    var outputs: [URL] = []
+                    if join { outputs = [try await self.buildJoined(items)] }
+                    else { for it in items { outputs.append(try await self.buildOne(it)) } }
+                    try await self.saveAll(outputs)
+                    let tmp = FileManager.default.temporaryDirectory.path
+                    for u in outputs where u.path.hasPrefix(tmp) { try? FileManager.default.removeItem(at: u) }
+                    call.resolve(["saved": outputs.count])
+                } catch {
+                    call.reject(error.localizedDescription)
+                }
+            }
+        }
     }
 }
