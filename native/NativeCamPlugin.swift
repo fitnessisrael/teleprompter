@@ -33,12 +33,37 @@ public class NativeCamPlugin: CAPPlugin, CAPBridgedPlugin, AVCaptureFileOutputRe
     private var mirror = true
     private var stopCall: CAPPluginCall?
 
+    private var cameraDevice: AVCaptureDevice?
+    private var rotationStore: Any?
+
     private func setPortrait(_ conn: AVCaptureConnection) {
         if #available(iOS 17.0, *) {
-            if conn.isVideoRotationAngleSupported(90) { conn.videoRotationAngle = 90 }
+            conn.videoRotationAngle = 90
         } else if conn.isVideoOrientationSupported {
             conn.videoOrientation = .portrait
         }
+    }
+
+    /// כיוון נכון לתצוגה ולקובץ (אנכי). ב-iOS 17 ומעלה משתמשים ב-RotationCoordinator של אפל.
+    private func updateRotation() {
+        let previewConn = previewView?.previewLayer.connection
+        let movieConn = movieOutput.connection(with: .video)
+        if #available(iOS 17.0, *) {
+            if let cam = cameraDevice, let layer = previewView?.previewLayer {
+                let rc: AVCaptureDevice.RotationCoordinator
+                if let existing = rotationStore as? AVCaptureDevice.RotationCoordinator {
+                    rc = existing
+                } else {
+                    rc = AVCaptureDevice.RotationCoordinator(device: cam, previewLayer: layer)
+                    rotationStore = rc
+                }
+                previewConn?.videoRotationAngle = rc.videoRotationAngleForHorizonLevelPreview
+                movieConn?.videoRotationAngle = rc.videoRotationAngleForHorizonLevelCapture
+                return
+            }
+        }
+        if let c = previewConn { setPortrait(c) }
+        if let c = movieConn { setPortrait(c) }
     }
 
     private func configureIfNeeded() throws {
@@ -51,6 +76,7 @@ public class NativeCamPlugin: CAPPlugin, CAPBridgedPlugin, AVCaptureFileOutputRe
             throw NSError(domain: "cam", code: 1, userInfo: [NSLocalizedDescriptionKey: "לא נמצאה מצלמה קדמית"])
         }
         session.addInput(input)
+        cameraDevice = cam
         if let mic = AVCaptureDevice.default(for: .audio),
            let audioIn = try? AVCaptureDeviceInput(device: mic), session.canAddInput(audioIn) {
             session.addInput(audioIn)
@@ -97,7 +123,7 @@ public class NativeCamPlugin: CAPPlugin, CAPBridgedPlugin, AVCaptureFileOutputRe
             previewView = v
         }
         previewView?.previewLayer.session = session
-        if let conn = previewView?.previewLayer.connection { setPortrait(conn) }
+        updateRotation()
         applyMirror()
         web.isOpaque = false
         web.backgroundColor = .clear
@@ -121,6 +147,7 @@ public class NativeCamPlugin: CAPPlugin, CAPBridgedPlugin, AVCaptureFileOutputRe
             await MainActor.run { self.installPreview() }
             self.queue.async {
                 if !self.session.isRunning { self.session.startRunning() }
+                DispatchQueue.main.async { self.updateRotation(); self.applyMirror() }
                 call.resolve(["width": 1920, "height": 1080, "fps": 30])
             }
         }
@@ -133,6 +160,7 @@ public class NativeCamPlugin: CAPPlugin, CAPBridgedPlugin, AVCaptureFileOutputRe
             DispatchQueue.main.async {
                 self.previewView?.removeFromSuperview()
                 self.previewView = nil
+                self.rotationStore = nil
                 UIApplication.shared.isIdleTimerDisabled = false
                 call.resolve()
             }
@@ -154,6 +182,7 @@ public class NativeCamPlugin: CAPPlugin, CAPBridgedPlugin, AVCaptureFileOutputRe
             let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("takes", isDirectory: true)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            DispatchQueue.main.sync { self.updateRotation() }
             let url = dir.appendingPathComponent("take-\(Int(Date().timeIntervalSince1970 * 1000)).mov")
             self.movieOutput.startRecording(to: url, recordingDelegate: self)
             call.resolve()
